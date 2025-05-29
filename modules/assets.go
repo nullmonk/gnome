@@ -10,20 +10,10 @@ import (
 )
 
 // Implement https://docs.realm.pub/user-guide/eldritch#assets
-
+// This module is a tiny bit more complex, because locker is passed at init time, the functions need access to it
 type AssetModule struct {
 	locker fs.FS
 	Module
-}
-
-func (a *AssetModule) assetsList(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	if err := starlark.UnpackPositionalArgs("", args, kwargs, 0); err != nil {
-		return nil, err
-	}
-	if a.locker == nil {
-		return starlark.None, fmt.Errorf("asset locker not initialized")
-	}
-	return ToStarlarkValue(a.GetAssets())
 }
 
 func NewAssetModule(locker fs.FS) *AssetModule {
@@ -36,6 +26,16 @@ func NewAssetModule(locker fs.FS) *AssetModule {
 	m.Module["read"] = starlark.NewBuiltin("assets.read", m.assetsRead)
 	m.Module["read_binary"] = starlark.NewBuiltin("assets.read_binary", m.assetsReadBinary)
 	return m
+}
+
+func (a *AssetModule) assetsList(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	if err := starlark.UnpackPositionalArgs("", args, kwargs, 0); err != nil {
+		return nil, err
+	}
+	if a.locker == nil {
+		return starlark.None, fmt.Errorf("asset locker not initialized")
+	}
+	return ToStarlarkValue(a.GetAssets())
 }
 
 func (a *AssetModule) assetsCopy(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
