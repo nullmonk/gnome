@@ -1,12 +1,9 @@
 package gnome
 
 import (
-	"io"
-	"os"
 	"syscall"
 	"unsafe"
 
-	"github.com/nullmonk/gnome/modules"
 	"go.starlark.net/starlark"
 	"golang.org/x/sys/unix"
 )
@@ -66,6 +63,7 @@ func fexecveat(fd uintptr, pathname string, argv []string, envv []string, flags 
 	return errno
 }
 
+/*
 // Stop execution of all the threads, then fexec a binary from either the system or the asset locker
 func fallback(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var code starlark.String
@@ -114,3 +112,4 @@ func fallback(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple,
 	}
 	return starlark.None, nil
 }
+*/

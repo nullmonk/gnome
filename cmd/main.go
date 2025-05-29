@@ -1,22 +1,27 @@
 package main
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
 	"os"
 
 	"github.com/nullmonk/gnome"
 )
 
-//go:embed example
+/* To embed assets directly into the binary, you can use the following:
+
+//go:embed assets/*
 var assets embed.FS
+assets, _ := fs.Sub(assets, "assets") // strip "assets/" from the embedded asset names
+scripts, err := gnome.GetScripts(assets) // Now all the scripts will have the correct assets
+
+*/
 
 func main() {
-	assets, _ := fs.Sub(assets, "example") // strip "example/" from the embedded asset names
-	gnome.SetAssetLocker(assets)           // register the assets
-	gnome.Run(os.Args[1:], func(script string, err error) error {
-		fmt.Printf("[!] error executing '%s': %s\n", script, err)
-		return nil
-	})
+	assets := os.DirFS("assets")
+	scripts, err := gnome.GetScripts(assets)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[!]", err)
+		return
+	}
+	gnome.Run(scripts, nil, nil)
 }

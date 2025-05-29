@@ -11,27 +11,44 @@ import (
 
 // Implement https://docs.realm.pub/user-guide/eldritch#assets
 
-func assetsList(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+type AssetModule struct {
+	locker fs.FS
+	Module
+}
+
+func (a *AssetModule) assetsList(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if err := starlark.UnpackPositionalArgs("", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	if assetLocker == nil {
+	if a.locker == nil {
 		return starlark.None, fmt.Errorf("asset locker not initialized")
 	}
-	return ToStarlarkValue(GetAssets())
+	return ToStarlarkValue(a.GetAssets())
 }
 
-func assetsCopy(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func NewAssetModule(locker fs.FS) *AssetModule {
+	m := &AssetModule{
+		locker: locker,
+		Module: make(Module),
+	}
+	m.Module["copy"] = starlark.NewBuiltin("assets.copy", m.assetsCopy)
+	m.Module["list"] = starlark.NewBuiltin("assets.list", m.assetsList)
+	m.Module["read"] = starlark.NewBuiltin("assets.read", m.assetsRead)
+	m.Module["read_binary"] = starlark.NewBuiltin("assets.read_binary", m.assetsReadBinary)
+	return m
+}
+
+func (a *AssetModule) assetsCopy(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name starlark.String
 	var dst starlark.String
 	if err := starlark.UnpackPositionalArgs("", args, kwargs, 2, &name, &dst); err != nil {
 		return nil, err
 	}
-	if assetLocker == nil {
+	if a.locker == nil {
 		return starlark.None, fmt.Errorf("asset locker not initialized")
 	}
 
-	f, err := assetLocker.Open(name.GoString())
+	f, err := a.locker.Open(name.GoString())
 	if err != nil {
 		return starlark.None, err
 	}
@@ -45,16 +62,16 @@ func assetsCopy(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tupl
 	return starlark.None, err
 }
 
-func assetsRead(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (a *AssetModule) assetsRead(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name starlark.String
 	if err := starlark.UnpackPositionalArgs("", args, kwargs, 1, &name); err != nil {
 		return nil, err
 	}
-	if assetLocker == nil {
+	if a.locker == nil {
 		return starlark.None, fmt.Errorf("asset locker not initialized")
 	}
 
-	f, err := assetLocker.Open(name.GoString())
+	f, err := a.locker.Open(name.GoString())
 	if err != nil {
 		return starlark.None, err
 	}
@@ -65,16 +82,16 @@ func assetsRead(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tupl
 	return starlark.String(string(buf)), nil
 }
 
-func assetsReadBinary(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (a *AssetModule) assetsReadBinary(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name starlark.String
 	if err := starlark.UnpackPositionalArgs("", args, kwargs, 1, &name); err != nil {
 		return nil, err
 	}
-	if assetLocker == nil {
+	if a.locker == nil {
 		return starlark.None, fmt.Errorf("asset locker not initialized")
 	}
 
-	f, err := assetLocker.Open(name.GoString())
+	f, err := a.locker.Open(name.GoString())
 	if err != nil {
 		return starlark.None, err
 	}
@@ -85,19 +102,9 @@ func assetsReadBinary(thread *starlark.Thread, _ *starlark.Builtin, args starlar
 	return starlark.Bytes(buf), nil
 }
 
-var assetLocker fs.FS
-
-func SetAssetLocker(f fs.FS) {
-	assetLocker = f
-}
-
-func GetAssetLocker() fs.FS {
-	return assetLocker
-}
-
-func GetAssets() []string {
+func (a *AssetModule) GetAssets() []string {
 	assets := make([]string, 0, 64)
-	fs.WalkDir(assetLocker, ".", func(path string, d fs.DirEntry, err error) error {
+	fs.WalkDir(a.locker, ".", func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() {
 			return nil
 		}
@@ -106,10 +113,3 @@ func GetAssets() []string {
 	})
 	return assets
 }
-
-var Assets = NewModule("assets", map[string]Function{
-	"copy":        assetsCopy,
-	"list":        assetsList,
-	"read_binary": assetsReadBinary,
-	"read":        assetsRead,
-})

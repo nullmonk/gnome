@@ -11,64 +11,76 @@ import (
 	"go.starlark.net/syntax"
 )
 
-type script struct {
-	name string
-	src  interface{}
+type Script struct {
+	Name    string
+	Src     any
+	Globals starlark.StringDict
+	Assets  fs.FS
 }
 
-func SetAssetLocker(f fs.FS) {
-	modules.SetAssetLocker(f)
-}
+type ErrorHandler func(script string, err error)
+type PrintHandler func(script string, msg string)
 
-// Run a stark script, passing in the previous globals if specified
-func Run(scripts []string, errorHandler func(script string, err error) error) error {
+// Parse the scripts to execute from the given asset FS. Useful for validating that the starlark is good before executing
+func GetScripts(assets fs.FS) ([]*Script, error) {
 	// Set the asset locker to whatever we have specified
-	assets := modules.GetAssetLocker()
-	scripts_to_run := make([]script, 0, 1)
-	if assets != nil {
-		err := fs.WalkDir(assets, ".", func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !strings.HasSuffix(path, ".eldr") && !strings.HasSuffix(path, ".eldritch") {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			buf, err := fs.ReadFile(assets, path)
-			if err != nil {
-				return nil
-			}
-			scripts_to_run = append(scripts_to_run, script{path, buf})
+	scripts_to_run := make([]*Script, 0, 1)
+	// Loop through the assets dir an look for scripts to execute
+	if assets == nil {
+		return nil, fmt.Errorf("invalid asset locker")
+	}
+	err := fs.WalkDir(assets, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !strings.HasSuffix(path, ".eldr") && !strings.HasSuffix(path, ".eldritch") {
 			return nil
-		})
-		if err != nil {
-			if err := errorHandler("", fmt.Errorf("failed loading script from assets: %v", err)); err != nil {
-				return err
-			}
 		}
-	}
-
-	for _, s := range scripts {
-		scripts_to_run = append(scripts_to_run, script{s, nil})
-	}
-
-	globals := starlark.StringDict{}
-	var err error
-	for _, s := range scripts_to_run {
-		globals, err = run(s.name, s.src, globals)
-		if err != nil {
-			if err := errorHandler(s.name, err); err != nil {
-				return err
-			}
+		if d.IsDir() {
+			return nil
 		}
+		buf, err := fs.ReadFile(assets, path)
+		if err != nil {
+			return err
+		}
+		_, err = syntax.LegacyFileOptions().Parse(path, buf, 0)
+		if err != nil {
+			return fmt.Errorf("invalid script: %s", err)
+		}
+		scripts_to_run = append(scripts_to_run, &Script{
+			Name:   path,
+			Src:    buf,
+			Assets: assets})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return scripts_to_run, nil
 }
 
-func run(name string, src interface{}, globals starlark.StringDict) (starlark.StringDict, error) {
-	thread := &starlark.Thread{Name: name}
+func Run(scripts []*Script, onprint PrintHandler, onerror ErrorHandler) {
+	for _, s := range scripts {
+		err := run(s, onprint)
+		if err != nil {
+			if onerror != nil {
+				onerror(s.Name, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "error executing %s: %s", s.Name, err)
+			}
+		}
+	}
+}
+
+func run(script *Script, print PrintHandler) error {
+	thread := &starlark.Thread{
+		Name: script.Name,
+	}
+	if print != nil {
+		thread.Print = func(thread *starlark.Thread, msg string) {
+			print(thread.Name, msg)
+		}
+	}
 	opts := &syntax.FileOptions{
 		Set:             true,
 		While:           true,
@@ -78,32 +90,35 @@ func run(name string, src interface{}, globals starlark.StringDict) (starlark.St
 	}
 
 	libs := starlark.StringDict{
-		"assets":   &modules.Assets,
-		"crypto":   &modules.Crypto,
-		"file":     &modules.File,
-		"http":     &modules.Http,
-		"pivot":    &modules.Pivot,
-		"process":  &modules.Process,
-		"regex":    &modules.Regex,
-		"report":   &modules.Report,
-		"sys":      &modules.Sys,
-		"time":     &modules.Time,
-		"exit":     starlark.NewBuiltin("exit", exit),
-		"quit":     starlark.NewBuiltin("exit", quit),
-		"fallback": starlark.NewBuiltin("fallback", fallback),
+		"assets":  modules.NewAssetModule(script.Assets),
+		"crypto":  &modules.Crypto,
+		"file":    &modules.File,
+		"http":    &modules.Http,
+		"pivot":   &modules.Pivot,
+		"process": &modules.Process,
+		"regex":   &modules.Regex,
+		"report":  &modules.Report,
+		"sys":     &modules.Sys,
+		"time":    &modules.Time,
+		"exit":    starlark.NewBuiltin("exit", exit),
+		"quit":    starlark.NewBuiltin("quit", quit),
+		// TODO: Pprint
+		//"fallback": starlark.NewBuiltin("fallback", fallback),
+	}
+
+	// Globals CAN overwrite the builtin libs, but we are going to assume the user intends that
+	for k, v := range script.Globals {
+		libs[k] = v
 	}
 
 	// Add the globals into the environment
-	for k, v := range globals {
-		libs[k] = v
-	}
-	res, err := starlark.ExecFileOptions(opts, thread, name, src, libs)
+	_, err := starlark.ExecFileOptions(opts, thread, script.Name, script.Src, libs)
 	if err != nil {
 		if e, ok := err.(*starlark.EvalError); ok {
 			// Check what the error message is, that is how we determined if we quit or exited
 			lines := strings.SplitN(e.Msg, ": ", 2)
 			if len(lines) < 2 {
-				return nil, err
+				return err
 			}
 			if lines[1] == "user exit" {
 				// On exit calls, the interpreter also dies
@@ -112,22 +127,12 @@ func run(name string, src interface{}, globals starlark.StringDict) (starlark.St
 				// on quit calls, only the script exits, not an error
 				err = nil
 			} else {
-				return nil, err
+				return err
 			}
 		} else {
-			return nil, err
+			return err
 		}
 	}
 
-	if globals == nil {
-		globals = make(starlark.StringDict, len(res))
-	}
-	// Update globals with the results of this script
-	for k, v := range res {
-		if strings.HasPrefix(k, "_") {
-			continue
-		}
-		globals[k] = v
-	}
-	return globals, nil
+	return nil
 }
