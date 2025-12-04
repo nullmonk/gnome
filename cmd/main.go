@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/nullmonk/gnome"
-	"github.com/nullmonk/gnome/backends/httpfs"
 )
 
 /* To embed assets directly into the binary, you can use the following:
@@ -19,13 +17,15 @@ scripts, err := gnome.GetScripts(assets) // Now all the scripts will have the co
 */
 
 func main() {
-	assets := &httpfs.HTTPFS{
-		Url:    "http://localhost:8080/",
-		Client: http.DefaultClient,
+	// An unescape-able fs that only allows access to files in the given directory
+	rootFs, err := os.OpenRoot(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[!]", err)
+		return
 	}
-	//assets := os.DirFS("assets")
+	assets := rootFs.FS()
+
 	scripts, err := gnome.GetScripts(assets)
-	fmt.Println(scripts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[!]", err)
 		return
