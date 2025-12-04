@@ -17,7 +17,14 @@ scripts, err := gnome.GetScripts(assets) // Now all the scripts will have the co
 */
 
 func main() {
-	assets := os.DirFS("assets")
+	// An unescape-able fs that only allows access to files in the given directory
+	rootFs, err := os.OpenRoot(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[!]", err)
+		return
+	}
+	assets := rootFs.FS()
+
 	scripts, err := gnome.GetScripts(assets)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[!]", err)

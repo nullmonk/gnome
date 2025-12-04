@@ -43,13 +43,17 @@ func GetScripts(assets fs.FS) ([]*Script, error) {
 		if err != nil {
 			return err
 		}
-		_, err = syntax.LegacyFileOptions().Parse(path, buf, 0)
+		bufstr := string(buf)
+		new, err := ConvertFStrings(bufstr)
+		if err != nil {
+			return fmt.Errorf("error handling format string: %v", err)
+		}
 		if err != nil {
 			return fmt.Errorf("invalid script: %s", err)
 		}
 		scripts_to_run = append(scripts_to_run, &Script{
 			Name:   path,
-			Src:    buf,
+			Src:    new,
 			Assets: assets})
 		return nil
 	})
